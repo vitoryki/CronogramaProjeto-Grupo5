@@ -1,4 +1,9 @@
-@import "tailwindcss";
+*,::before,::after{box-sizing:border-box;margin:0;padding:0;border:0 solid}
+h1,h2,h3,p{font-size:inherit;font-weight:inherit}
+button,input,select{font:inherit;color:inherit;background:transparent;border-radius:0}
+button{cursor:pointer}
+img,svg{display:block;max-width:100%}
+a{color:inherit;text-decoration:inherit}
 
 :root {
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
