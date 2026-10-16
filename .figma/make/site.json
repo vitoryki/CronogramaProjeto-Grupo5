@@ -1,0 +1,10 @@
+{
+  "description": "Streamline project management with a scheduling tool that organizes tasks, deadlines, and responsibilities, enhancing team alignment and efficiency.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
