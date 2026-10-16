@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 
 type IconName =
@@ -300,6 +300,7 @@ type SharedProjectState = {
   roleDirectory: Record<string, string>;
   shoppingItems: ShoppingItem[];
   billItems: BillItem[];
+  updatedAt?: string;
 };
 
 const projectStateUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3d9d32df/project-state`;
@@ -350,6 +351,9 @@ export default function App() {
   const [openBills, setOpenBills] = useState<number[]>([]);
   const [serverReady, setServerReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<"loading" | "saving" | "saved" | "error">("loading");
+  const lastServerUpdate = useRef<string | null>(null);
+  const pendingServerSave = useRef(false);
+  const skipNextServerSave = useRef(false);
 
   useEffect(() => {
     localStorage.setItem("recimap-schedule", JSON.stringify(scheduleData));
@@ -378,6 +382,7 @@ export default function App() {
         const result = await response.json();
         const state = result.state as SharedProjectState | null;
         if (active && state) {
+          lastServerUpdate.current = state.updatedAt ?? null;
           setScheduleData(state.scheduleData ?? initialSchedule);
           setOwnerHistory(state.ownerHistory ?? []);
           setRoleDirectory(state.roleDirectory ?? {});
@@ -407,7 +412,13 @@ export default function App() {
 
   useEffect(() => {
     if (!serverReady) return;
+    if (skipNextServerSave.current) {
+      skipNextServerSave.current = false;
+      return;
+    }
+
     setSyncStatus("saving");
+    pendingServerSave.current = true;
 
     const timeout = window.setTimeout(async () => {
       const state: SharedProjectState = {
@@ -428,15 +439,59 @@ export default function App() {
           body: JSON.stringify(state),
         });
         if (!response.ok) throw new Error(`Save failed with ${response.status}`);
+        const result = await response.json();
+        lastServerUpdate.current = result.updatedAt ?? lastServerUpdate.current;
+        pendingServerSave.current = false;
         setSyncStatus("saved");
       } catch (error) {
         console.error("Não foi possível salvar o estado compartilhado:", error);
+        pendingServerSave.current = false;
         setSyncStatus("error");
       }
     }, 500);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      pendingServerSave.current = false;
+    };
   }, [billItems, ownerHistory, roleDirectory, scheduleData, serverReady, shoppingItems]);
+
+  useEffect(() => {
+    if (!serverReady) return;
+
+    const refreshSharedState = async () => {
+      if (pendingServerSave.current) return;
+      try {
+        const response = await fetch(projectStateUrl, {
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+            apikey: publicAnonKey,
+          },
+        });
+        if (!response.ok) throw new Error(`Refresh failed with ${response.status}`);
+        const result = await response.json();
+        const state = result.state as SharedProjectState | null;
+        if (!state?.updatedAt || state.updatedAt === lastServerUpdate.current) return;
+
+        lastServerUpdate.current = state.updatedAt;
+        skipNextServerSave.current = true;
+        setScheduleData(state.scheduleData ?? initialSchedule);
+        setOwnerHistory(state.ownerHistory ?? []);
+        setRoleDirectory(state.roleDirectory ?? {});
+        setShoppingItems(state.shoppingItems ?? []);
+        setBillItems(state.billItems ?? []);
+        localStorage.setItem("recimap-owner-history", JSON.stringify(state.ownerHistory ?? []));
+        localStorage.setItem("recimap-owner-roles", JSON.stringify(state.roleDirectory ?? {}));
+        setSyncStatus("saved");
+      } catch (error) {
+        console.error("Não foi possível atualizar os dados compartilhados:", error);
+        setSyncStatus("error");
+      }
+    };
+
+    const interval = window.setInterval(refreshSharedState, 3000);
+    return () => window.clearInterval(interval);
+  }, [serverReady]);
   const totalTasks = scheduleData.reduce((total, phase) => total + phase.tasks.length, 0);
   const completedTasks = scheduleData.reduce(
     (total, phase) => total + phase.tasks.filter((task) => task.status === "done").length,
